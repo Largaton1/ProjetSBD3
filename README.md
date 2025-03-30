@@ -5,8 +5,8 @@ The goal is to protect sensitive data stored in a PostgreSQL database, specifica
 2. Measure the performance (insert/read time) of this encryption with a Python script.
 3. (Bonus) Attack the encryption using frequency analysis in ECB mode.
 # Technical Environment
-DBMS Used: PostgreSQL
-Extension: pgcrypto (provides functions such as pgp_sym_encrypt, pgp_sym_decrypt)
-SQL + PL/pgSQL Language: for the database, functions, and triggers
-Python: for generating data and measuring performance
-Encryption Algorithm: AES256 in CBC mode (required), ECB (optional for attacks)
+- DBMS Used: PostgreSQL
+- Extension: pgcrypto (provides functions such as pgp_sym_encrypt, pgp_sym_decrypt)
+- SQL + PL/pgSQL Language: for the database, functions, and triggers
+- Python: for generating data and measuring performance
+- Encryption Algorithm: AES256 in CBC mode (required), ECB (optional for attacks)
