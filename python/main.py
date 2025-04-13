@@ -1,10 +1,11 @@
+
 import psycopg2
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 
-# 🔐 Paramètres de connexion PostgreSQL 
+# Connexion PostgreSQL
 conn_params = {
     "dbname": "projet3",
     "user": "postgres",
@@ -12,17 +13,8 @@ conn_params = {
     "host": "localhost",
     "port": "5432"
 }
-# ✅ Vérifie la connexion une seule fois
-def check_connection():
-    try:
-        conn = psycopg2.connect(**conn_params)
-        conn.close()
-        print("Connexion réussie à PostgreSQL\n")
-    except Exception as e:
-        print("Erreur de connexion :", e)
-        exit()
 
-# Génération des données simulées (N(5000, 500))
+# Génération des données
 def generate_data(n=1000, seed=42):
     np.random.seed(seed)
     enames = [f"Employee_{i}" for i in range(1, n + 1)]
@@ -36,78 +28,122 @@ def generate_data(n=1000, seed=42):
         "SAL": salaries
     })
 
-# Insertion des données (déclenche le trigger de chiffrement)
-def insert_data(conn, df):
+def insert_plain(conn, df):
     cur = conn.cursor()
     start = time.time()
     for _, row in df.iterrows():
-        cur.execute("""
-            INSERT INTO EMP (ENAME, JOB, HIREDATE, SAL)
-            VALUES (%s, %s, %s, %s)
-        """, (row["ENAME"], row["JOB"], row["HIREDATE"].date(), int(row["SAL"])))
+        cur.execute("INSERT INTO EMP_PLAIN (ENAME, JOB, HIREDATE, SAL) VALUES (%s, %s, %s, %s)",
+                    (row["ENAME"], row["JOB"], row["HIREDATE"].date(), int(row["SAL"])))
     conn.commit()
     cur.close()
     return time.time() - start
 
-# 📤 Lecture via la vue EMP_DECRYPTED (déclenche déchiffrement)
-def read_data(conn):
+def insert_encrypted(conn, df):
     cur = conn.cursor()
     start = time.time()
-    cur.execute("SELECT * FROM EMP_ENCRYPTED_DECRYPTED")
+    for _, row in df.iterrows():
+        cur.execute("INSERT INTO EMP (ENAME, JOB, HIREDATE, SAL) VALUES (%s, %s, %s, %s)",
+                    (row["ENAME"], row["JOB"], row["HIREDATE"].date(), int(row["SAL"])))
+    conn.commit()
+    cur.close()
+    return time.time() - start
 
+def read_plain(conn):
+    cur = conn.cursor()
+    start = time.time()
+    cur.execute("SELECT * FROM EMP_PLAIN")
     _ = cur.fetchall()
     cur.close()
     return time.time() - start
 
-# 🧪 Benchmark complet sur différentes tailles
-def run_benchmark(sample_sizes):
-    insert_times = []
-    read_times = []
+def read_encrypted(conn):
+    cur = conn.cursor()
+    start = time.time()
+    cur.execute("SELECT * FROM EMP_ENCRYPTED_DECRYPTED")
+    _ = cur.fetchall()
+    cur.close()
+    return time.time() - start
 
-    for n in sample_sizes:
-        print(f"🔍 Test avec {n} lignes...")
-        conn = psycopg2.connect(**conn_params)
+def read_encrypted_raw(conn):
+    cur = conn.cursor()
+    start = time.time()
+    cur.execute("SELECT * FROM EMP_ENCRYPTED")
+    _ = cur.fetchall()
+    cur.close()
+    return time.time() - start
+
+def comparaison(sample_sizes):
+    results = []
+
+    with psycopg2.connect(**conn_params) as conn:
         cur = conn.cursor()
-        cur.execute("DELETE FROM EMP")  # Nettoie la table
-        conn.commit()
+        for n in sample_sizes:
+            print(f"Test avec {n} lignes...")
 
-        df = generate_data(n)
-        t_insert = insert_data(conn, df)
-        t_read = read_data(conn)
+            cur.execute("DELETE FROM EMP")
+            cur.execute("DELETE FROM EMP_ENCRYPTED")
+            cur.execute("DELETE FROM EMP_PLAIN")
+            conn.commit()
 
-        insert_times.append(t_insert)
-        read_times.append(t_read)
+            df = generate_data(n)
 
-        conn.close()
+            t_plain_insert = insert_plain(conn, df)
+            t_enc_insert = insert_encrypted(conn, df)
+            t_plain_read = read_plain(conn)
+            t_enc_read = read_encrypted(conn)
+            t_enc_raw_read = read_encrypted_raw(conn)
 
-    # Export CSV
-    results_df = pd.DataFrame({
-        "Taille": sample_sizes,
-        "Temps Insertion (s)": insert_times,
-        "Temps Lecture (s)": read_times
-    })
-    results_df.to_csv("resultats.csv", index=False, encoding="utf-8")
-    print("Résultats exportés dans resultats.csv")
+            results.append({
+                "Taille": n,
+                "Insertion en clair": t_plain_insert,
+                "Insertion chiffrée": t_enc_insert,
+                "Lecture en clair": t_plain_read,
+                "Lecture chiffrée": t_enc_raw_read,
+                "Lecture déchiffrée": t_enc_read
+            })
 
-    return sample_sizes, insert_times, read_times
+    df_results = pd.DataFrame(results)
+    csv_path = "D:/ProjetSBD3/resultats.csv"
+    df_results.to_csv(csv_path, index=False)
 
-# 🚀 Lancement
-if __name__ == "__main__":
-    tailles = [100, 500, 1000, 5000, 10000]
-    x, y_insert, y_read = run_benchmark(tailles)
-
-    # Affichage console
-    print("\n Résultats :")
-    for i in range(len(x)):
-        print(f"{x[i]} lignes → Insertion : {y_insert[i]:.2f}s | Lecture : {y_read[i]:.2f}s")
-
-    # Graphique
-    plt.plot(x, y_insert, label="Insertion (chiffrée)", marker='o')
-    plt.plot(x, y_read, label="Lecture (vue déchiffrée)", marker='o')
+    # Graphique Insertion claire vs chiffrée
+    plt.figure()
+    plt.plot(df_results["Taille"], df_results["Insertion en clair"], label="Insertion en clair", marker='o')
+    plt.plot(df_results["Taille"], df_results["Insertion chiffrée"], label="Insertion chiffrée", marker='o')
     plt.xlabel("Nombre de lignes")
     plt.ylabel("Temps (secondes)")
-    plt.title("Performance AES256-CBC selon le volume de données")
+    plt.title("Comparaison des insertions : clair vs chiffrée")
     plt.legend()
     plt.grid(True)
-    plt.savefig("resultats_comparatifs.png")
-    plt.show()
+    plt.savefig("D:/ProjetSBD3/graphique_insertion.png")
+    plt.close()
+
+    # Graphique Lecture claire vs déchiffrée
+    plt.figure()
+    plt.plot(df_results["Taille"], df_results["Lecture en clair"], label="Lecture en clair", marker='o')
+    plt.plot(df_results["Taille"], df_results["Lecture déchiffrée"], label="Lecture déchiffrée", marker='o')
+    plt.xlabel("Nombre de lignes")
+    plt.ylabel("Temps (secondes)")
+    plt.title("Lecture : clair vs déchiffré")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("D:/ProjetSBD3/graphique_lecture_clair_dechiffre.png")
+    plt.close()
+
+    # Graphique Lecture chiffrée vs déchiffrée
+    plt.figure()
+    plt.plot(df_results["Taille"], df_results["Lecture chiffrée"], label="Lecture chiffrée", marker='o')
+    plt.plot(df_results["Taille"], df_results["Lecture déchiffrée"], label="Lecture déchiffrée", marker='o')
+    plt.xlabel("Nombre de lignes")
+    plt.ylabel("Temps (secondes)")
+    plt.title("Lecture : chiffrée vs déchiffrée")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("D:/ProjetSBD3/graphique_lecture_chiffre_dechiffre.png")
+    plt.close()
+
+    return csv_path
+
+# Exécution
+comparaison([100, 500, 1000, 5000])
+
