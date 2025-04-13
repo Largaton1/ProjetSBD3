@@ -7,24 +7,23 @@ DROP TABLE IF EXISTS EMP CASCADE;
 DROP TABLE IF EXISTS crypto_keys CASCADE;
 
 -- 3. Créer une table pour stocker la clé de chiffrement
+-- Cette table contient la clé AES256 utilisée pour le chiffrement et le déchiffrement
+-- des salaires dans la table EMP_ENCRYPTED.
+-- La clé est stockée sous forme de texte.
+-- La clé est générée aléatoirement et encodée en hexadécimal.
+
 CREATE TABLE crypto_keys (
   id SERIAL PRIMARY KEY,
   key TEXT NOT NULL
 );
 
--- 4. Insérer une clé AES256 (32 octets hexadécimaux → 64 caractères)
+-- 4. Insérer une clé AES256  dans la table crypto_keys
+-- Cette clé est utilisée pour le chiffrement et le déchiffrement des salaires
+-- dans la table EMP_ENCRYPTED.
+-- La clé est générée aléatoirement et encodée en hexadécimal.
 INSERT INTO crypto_keys (key)
 VALUES (encode(gen_random_bytes(32), 'hex'));
 
--- 5. Créer la table EMP avec SAL en clair et SAL_ENC pour stockage chiffré
-CREATE TABLE EMP (
-  EMPNO SERIAL PRIMARY KEY,
-  ENAME VARCHAR(256),
-  JOB VARCHAR(256),
-  HIREDATE DATE,
-  SAL INT,
-  SAL_ENC BYTEA
-);
 
 -- 6. Fonction pour récupérer la clé (depuis la table)
 CREATE OR REPLACE FUNCTION get_crypto_key() RETURNS TEXT AS $$
@@ -36,7 +35,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 7. Fonction de chiffrement
+-- 7. Fonction de chiffrement du salaire
+-- Cette fonction chiffre le salaire en utilisant la clé de la table crypto_keys
+-- et retourne le résultat sous forme de BYTEA.
 CREATE OR REPLACE FUNCTION encrypt_salary(salary INT) RETURNS BYTEA AS $$
 DECLARE
   key TEXT := get_crypto_key();
@@ -49,7 +50,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 8. Fonction de déchiffrement
+-- 8. Fonction de déchiffrement du salaire
 CREATE OR REPLACE FUNCTION decrypt_salary(salary BYTEA) RETURNS INT AS $$
 DECLARE
   key TEXT := get_crypto_key();
@@ -60,27 +61,59 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 9. Fonction de trigger
-CREATE OR REPLACE FUNCTION encrypt_sal_trigger() RETURNS TRIGGER AS $$
+-- Trigger AFTER INSERT sur EMP
+-- Cette fonction est déclenchée après l'insertion d'une ligne dans la table EMP.
+-- Elle insère une ligne dans la table EMP_ENCRYPTED avec le salaire chiffré.
+-- La fonction utilise la fonction encrypt_salary pour chiffrer le salaire avant de l'insérer.
+-- La table EMP_ENCRYPTED contient les colonnes EMPNO, ENAME, JOB, HIREDATE et SAL_ENC.
+-- La colonne SAL_ENC contient le salaire chiffré.
+CREATE OR REPLACE FUNCTION insert_into_encrypted() RETURNS TRIGGER AS $$
 BEGIN
-  NEW.SAL_ENC := encrypt_salary(NEW.SAL);
-  NEW.SAL := NULL;
+  INSERT INTO EMP_ENCRYPTED (EMPNO, ENAME, JOB, HIREDATE, SAL_ENC)
+  VALUES (
+    NEW.EMPNO,
+    NEW.ENAME,
+    NEW.JOB,
+    NEW.HIREDATE,
+    encrypt_salary(NEW.SAL)
+  );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- 10. Déclencheur (trigger) sur la table EMP
-CREATE TRIGGER trg_encrypt_sal
-BEFORE INSERT OR UPDATE ON EMP
-FOR EACH ROW
-EXECUTE FUNCTION encrypt_sal_trigger();
 
--- 11. Vue pour afficher les salaires en clair
-CREATE OR REPLACE VIEW EMP_DECRYPTED AS
+-- Verification de la fonction de chiffrement
+CREATE TRIGGER trg_encrypt_on_insert
+AFTER INSERT ON EMP
+FOR EACH ROW
+EXECUTE FUNCTION insert_into_encrypted();
+
+
+-- Vue déchiffrée : EMP_ENCRYPTED_DECRYPTED
+-- Cette vue déchiffre le salaire de la table EMP_ENCRYPTED
+-- en utilisant la fonction decrypt_salary.
+
+CREATE OR REPLACE VIEW EMP_ENCRYPTED_DECRYPTED AS
 SELECT
   EMPNO,
   ENAME,
   JOB,
   HIREDATE,
   decrypt_salary(SAL_ENC) AS SAL
-FROM EMP;
+FROM EMP_ENCRYPTED;
+
+-- Fonction de chiffrement du salaire en mode ECB
+
+CREATE OR REPLACE FUNCTION encrypt_ecb(salary INT) RETURNS BYTEA AS $$
+DECLARE
+  key TEXT := (SELECT key FROM crypto_keys ORDER BY id DESC LIMIT 1);
+BEGIN
+ 
+  RETURN pgp_sym_encrypt(
+    salary::TEXT,
+    key,
+    'cipher-algo=aes256, compress-algo=0'
+  );
+END;
+$$ LANGUAGE plpgsql;
+
