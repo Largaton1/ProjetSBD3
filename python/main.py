@@ -8,8 +8,8 @@ import time
 # Connexion PostgreSQL
 conn_params = {
     "dbname": "projet3",
-    "user": "postgres",
-    "password": "admin",
+    "user": "votre_utilisateur",
+    "password": "votre_mot_de_passe",
     "host": "localhost",
     "port": "5432"
 }
